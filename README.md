@@ -271,7 +271,7 @@ outputs/
 ### Image Generation Notes
 
 > [!TIP]
-> Paper2Slides uses `gemini-3-pro-image-preview` (Nano Banana) for image generation. Key findings:
+> Paper2Slides uses `gemini-3-pro-image-preview` (Nano Banana Pro Preview) for image generation. Key findings:
 > 
 > - **Mood Keywords**: Words like "warm", "elegant", "vibrant" strongly influence the overall color palette
 > - **Layout vs Style**: Fine-grained *layout* instructions ground well; fine-grained *element styling* does not
