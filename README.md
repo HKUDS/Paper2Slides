@@ -57,21 +57,21 @@ python -m paper2slides --input paper.pdf --output slides --style doraemon --leng
 
 <table>
 <tr>
-<td align="center" width="290"><img src="assets/doraemon_poster.png" width="280"/><br/><code>doraemon</code></td>
-<td align="center" width="290"><img src="assets/academic_poster.png" width="280"/><br/><code>academic</code></td>
-<td align="center" width="290"><img src="assets/totoro_poster.png" width="280"/><br/><code>custom</code></td>
+<td align="center" width="290"><img src="assets/doraemon_poster.png?v=2" width="280"/><br/><code>doraemon</code></td>
+<td align="center" width="290"><img src="assets/academic_poster.png?v=2" width="280"/><br/><code>academic</code></td>
+<td align="center" width="290"><img src="assets/totoro_poster.png?v=2" width="280"/><br/><code>custom</code></td>
 </tr>
 </table>
 
 <table>
 <tr>
-<td align="center" width="290"><a href="assets/doraemon_slides.pdf"><img src="assets/doraemon_slides_preview.png" width="280"/></a><br/><code>doraemon</code></td>
-<td align="center" width="290"><a href="assets/academic_slides.pdf"><img src="assets/academic_slides_preview.png" width="280"/></a><br/><code>academic</code></td>
-<td align="center" width="290"><a href="assets/totoro_slides.pdf"><img src="assets/totoro_slides_preview.png" width="280"/></a><br/><code>custom</code></td>
+<td align="center" width="290"><a href="assets/doraemon_slides.pdf"><img src="assets/doraemon_slides_preview.png?v=2" width="280"/></a><br/><code>doraemon</code></td>
+<td align="center" width="290"><a href="assets/academic_slides.pdf"><img src="assets/academic_slides_preview.png?v=2" width="280"/></a><br/><code>academic</code></td>
+<td align="center" width="290"><a href="assets/totoro_slides.pdf"><img src="assets/totoro_slides_preview.png?v=2" width="280"/></a><br/><code>custom</code></td>
 </tr>
 </table>
 
-<sub>✨ Multiple styles available — simply modify the <code>--style</code> parameter</sub>
+<sub>✨ Examples generated from <a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models</a> — multiple styles available by modifying the <code>--style</code> parameter</sub>
 
 </div>
 
