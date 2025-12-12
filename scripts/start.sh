@@ -4,14 +4,55 @@
 # Starts both backend API and frontend web interface
 # For individual services, use start_backend.sh or start_frontend.sh
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Get script directory correctly whether run via bash, sh, or directly
+if [ -n "${BASH_SOURCE:-}" ]; then
+    SCRIPT_PATH="${BASH_SOURCE[0]}"
+else
+    SCRIPT_PATH="$0"
+fi
+SCRIPT_DIR="$( cd "$( dirname "$SCRIPT_PATH" )" && pwd )"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
+
+# Check if we are in the correct directory
+if [ ! -d "api" ] || [ ! -d "frontend" ]; then
+    echo "❌ Error: Cannot find project directories (api/ or frontend/)"
+    echo "   Detected Project Root: $PROJECT_ROOT"
+    echo "   Please run this script from the project root or via scripts/start.sh"
+    exit 1
+fi
 
 echo "=========================================="
 echo "Starting Paper2Slides Services"
 echo "=========================================="
 echo ""
+
+# Check for required dependencies
+check_dependencies() {
+    local missing=0
+    
+    if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
+        echo "❌ Error: Python not found (python or python3)"
+        echo "   Please install Python: https://www.python.org/downloads/"
+        missing=1
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "❌ Error: npm not found"
+        echo "   Please install Node.js (includes npm): https://nodejs.org/"
+        echo "   Or install via package manager: apt install npm / brew install node"
+        missing=1
+    fi
+
+    if [ $missing -eq 1 ]; then
+        echo ""
+        echo "Unable to start services. Please install missing dependencies."
+        exit 1
+    fi
+}
+
+# Run checks
+check_dependencies
 
 # Find available port starting from 8001
 find_available_port() {
@@ -113,6 +154,13 @@ echo ""
 # Start frontend
 echo "Starting frontend..."
 cd "$PROJECT_ROOT/frontend"
+
+# Check if node_modules exists, install dependencies if missing
+if [ ! -d "node_modules" ]; then
+    echo "📦 Dependencies not found. Installing..."
+    npm install
+fi
+
 npm run dev
 
 # Cleanup on exit
