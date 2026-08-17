@@ -29,6 +29,7 @@ from paper2slides.core import (
 )
 from paper2slides.utils.path_utils import get_project_name
 from paper2slides.utils import setup_logging
+from api.file_utils import filter_supported_files, find_supported_session_files
 
 # Configuration - use project root directories
 UPLOAD_DIR = PROJECT_ROOT / "sources" / "uploads"
@@ -320,10 +321,10 @@ async def generate_slides_with_pipeline(
     Returns:
         Dictionary with slides info and output paths
     """
-    # Find PDF files (support multiple PDFs in one session)
-    pdf_files = [f for f in files if f['filename'].lower().endswith('.pdf')]
-    if not pdf_files:
-        raise ValueError("No PDF file found in uploaded files")
+    # Keep the API input contract aligned with the formats supported by BatchParser.
+    input_files = filter_supported_files(files)
+    if not input_files:
+        raise ValueError("No supported input file found in uploaded files")
     
     # Parse style and message
     # Priority: message > style parameter
@@ -342,26 +343,26 @@ async def generate_slides_with_pipeline(
         style_type = "custom"
         custom_style = style
     
-    # Handle multiple PDFs: all paths in a list
-    pdf_paths = [f['path'] for f in pdf_files]
+    # Handle multiple supported input files as one project.
+    input_paths = [f['path'] for f in input_files]
     
-    # Determine paths (using session-based directory for multiple PDFs)
-    if len(pdf_paths) > 1:
-        # Multiple PDFs: use session_id as the identifier
+    # Determine paths (using session-based directory for multiple inputs)
+    if len(input_paths) > 1:
+        # Multiple input files: use session_id as the identifier
         project_name = f"session_{session_id[:8]}"
         # Use session directory as input_path for multiple files
-        input_path = str(Path(pdf_paths[0]).parent)
-        print(f"Processing {len(pdf_paths)} PDFs as a single project")
+        input_path = str(Path(input_paths[0]).parent)
+        print(f"Processing {len(input_paths)} input files as a single project")
     else:
-        # Single PDF: use pdf name
-        project_name = get_project_name(pdf_paths[0])
-        # Use the single PDF path as input_path
-        input_path = pdf_paths[0]
+        # Single input file: use its name for the project.
+        project_name = get_project_name(input_paths[0])
+        input_path = input_paths[0]
     
     # Build config matching main.py format
     config = {
         "input_path": input_path,  # Required by RAG stage
-        "pdf_paths": pdf_paths,  # Support multiple PDFs
+        # Keep the legacy key so existing PDF-only state/config hashes stay stable.
+        "pdf_paths": input_paths,
         "content_type": content,
         "output_type": output_type,
         "style": style_type,
@@ -376,8 +377,8 @@ async def generate_slides_with_pipeline(
     
     print(f"\nPipeline Configuration:")
     print(f"  Project: {project_name}")
-    print(f"  PDFs: {len(pdf_paths)}")
-    for i, path in enumerate(pdf_paths, 1):
+    print(f"  Input files: {len(input_paths)}")
+    for i, path in enumerate(input_paths, 1):
         print(f"    [{i}] {Path(path).name}")
     if message and message.strip():
         print(f"  Message: {message}")
@@ -445,16 +446,15 @@ def _update_state_on_error(
     from paper2slides.core.state import load_state, save_state
     import json
     
-    # Find PDF files
-    pdf_files = [f for f in files if f['filename'].lower().endswith('.pdf')]
-    if not pdf_files:
+    input_files = filter_supported_files(files)
+    if not input_files:
         return
     
-    pdf_paths = [f['path'] for f in pdf_files]
-    if len(pdf_paths) > 1:
+    input_paths = [f['path'] for f in input_files]
+    if len(input_paths) > 1:
         project_name = f"session_{session_id[:8]}"
     else:
-        project_name = get_project_name(pdf_paths[0])
+        project_name = get_project_name(input_paths[0])
     
     # Determine which stage failed by checking state file
     base_dir = get_base_dir(str(OUTPUT_DIR), project_name, content)
@@ -556,16 +556,16 @@ async def get_status(session_id: str):
         if not session_dir.exists():
             raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
         
-        # Get PDF files from session
-        pdf_files = list(session_dir.glob("*.pdf"))
-        if not pdf_files:
+        # Get supported input files from the session.
+        input_files = find_supported_session_files(session_dir)
+        if not input_files:
             return {"session_id": session_id, "status": "no_files", "stages": {}}
         
         # Determine project name and paths
-        if len(pdf_files) > 1:
+        if len(input_files) > 1:
             project_name = f"session_{session_id[:8]}"
         else:
-            project_name = get_project_name(str(pdf_files[0]))
+            project_name = get_project_name(str(input_files[0]))
         
         # Try to find the state file matching session_id
         from paper2slides.core.paths import get_base_dir
@@ -664,11 +664,19 @@ async def get_result(session_id: str):
             
             # Get output_type from state
             session_dir = UPLOAD_DIR / session_id
-            pdf_files = list(session_dir.glob("*.pdf"))
-            if len(pdf_files) > 1:
+            input_files = find_supported_session_files(session_dir)
+            if not input_files:
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "message": "No supported input files found for session",
+                        "session_id": session_id,
+                    },
+                )
+            if len(input_files) > 1:
                 project_name = f"session_{session_id[:8]}"
             else:
-                project_name = get_project_name(str(pdf_files[0]))
+                project_name = get_project_name(str(input_files[0]))
             
             # Try to get output type from state
             from paper2slides.core.paths import get_base_dir
@@ -770,4 +778,3 @@ if __name__ == "__main__":
         limit_concurrency=10,    
         limit_max_requests=1000  
     )
-

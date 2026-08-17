@@ -29,6 +29,12 @@ from typing import (
     TypeVar,
 )
 
+from paper2slides.file_formats import (
+    IMAGE_FORMATS as SHARED_IMAGE_FORMATS,
+    OFFICE_FORMATS as SHARED_OFFICE_FORMATS,
+    TEXT_FORMATS as SHARED_TEXT_FORMATS,
+)
+
 T = TypeVar("T")
 
 
@@ -51,9 +57,9 @@ class Parser:
     """
 
     # Define common file formats
-    OFFICE_FORMATS = {".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"}
-    IMAGE_FORMATS = {".png", ".jpeg", ".jpg", ".bmp", ".tiff", ".tif", ".gif", ".webp"}
-    TEXT_FORMATS = {".txt", ".md"}
+    OFFICE_FORMATS = SHARED_OFFICE_FORMATS
+    IMAGE_FORMATS = SHARED_IMAGE_FORMATS
+    TEXT_FORMATS = SHARED_TEXT_FORMATS
 
     # Class-level logger
     logger = logging.getLogger(__name__)
