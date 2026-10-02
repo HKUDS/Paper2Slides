@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict
 
-from ...utils import load_json, save_json, save_text
+from ...utils import load_json, save_json, save_text, get_llm_model
 from ..paths import get_rag_checkpoint, get_summary_checkpoint, get_summary_md
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ async def run_summary_stage(base_dir: Path, config: Dict) -> Dict:
     
     api_key = os.getenv("RAG_LLM_API_KEY", "")
     base_url = os.getenv("RAG_LLM_BASE_URL")
-    model = os.getenv("LLM_MODEL", "gpt-4o-mini")
+    model = get_llm_model()
     llm_client = OpenAI(api_key=api_key, base_url=base_url)
     
     logger.info(f"Extracting content from indexed documents ({content_type})...")
@@ -59,7 +59,7 @@ async def run_summary_stage(base_dir: Path, config: Dict) -> Dict:
         content = await extract_paper(
             rag_results=rag_results,
             llm_client=llm_client,
-            model="gpt-4o-mini",
+            model=model,
             parallel=True,
             max_concurrency=5,
         )
@@ -71,7 +71,7 @@ async def run_summary_stage(base_dir: Path, config: Dict) -> Dict:
         content = await extract_general(
             rag_results=all_results,
             llm_client=llm_client,
-            model="gpt-4o-mini",
+            model=model,
         )
         summary_text = content.content
     

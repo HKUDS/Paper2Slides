@@ -9,7 +9,7 @@ import asyncio
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from ...utils import save_json
+from ...utils import save_json, get_llm_model
 from ..paths import get_rag_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -317,7 +317,8 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
         
         # Use OpenAI to query markdown content directly
         logger.info("")
-        logger.info(f"Running queries with GPT-4o and images ({content_type})...")
+        model = get_llm_model(default="gpt-4o")
+        logger.info(f"Running queries with {model} and images ({content_type})...")
         
         from openai import OpenAI
         
@@ -325,13 +326,14 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
         base_url = os.getenv("RAG_LLM_BASE_URL")
         client = OpenAI(api_key=api_key, base_url=base_url)
         
-        # Execute queries (direct GPT-4o with images in original positions)
+        # Execute queries (direct LLM with images in original positions)
         if content_type == "paper":
             rag_results = await _run_fast_queries_by_category(
                 client=client,
                 markdown_content="",  # Not used anymore, content is processed inside
                 markdown_paths=markdown_paths,
                 queries_by_category=RAG_PAPER_QUERIES,
+                model=model,
             )
         else:
             raise ValueError("Fast mode currently only supports content_type='paper'")

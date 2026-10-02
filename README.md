@@ -288,6 +288,20 @@ outputs/
 | `doraemon` | Colorful, friendly style with illustrations |
 | `custom` | Any text description for LLM-generated style |
 
+### DeepSeek & Other OpenAI-Compatible Endpoints
+
+Works the same as the OpenAI default — point `RAG_LLM_BASE_URL` at the endpoint and name the model via `LLM_MODEL` so **every** stage uses it:
+
+```env
+RAG_LLM_API_KEY="sk-..."
+RAG_LLM_BASE_URL="https://api.deepseek.com/v1"
+LLM_MODEL="deepseek-v4-pro"
+RAG_LLM_MAX_TOKENS="8192"
+```
+
+> [!WARNING]
+> If `LLM_MODEL` is not set, Paper2Slides falls back to `gpt-4o-mini` — that model name is rejected with a 400 error by DeepSeek, Azure, local servers and most other endpoints. A startup warning tells you when this happens.
+
 ### Image Generation Providers
 
 - Set `IMAGE_GEN_PROVIDER` in `paper2slides/.env` to choose the backend:

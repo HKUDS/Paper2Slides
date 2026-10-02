@@ -11,6 +11,7 @@ from openai import OpenAI
 
 from .config import GenerationInput, OutputType
 from ..summary import FigureInfo, TableInfo
+from ..utils import get_llm_model
 from ..prompts.content_planning import (
     PAPER_SLIDES_PLANNING_PROMPT,
     PAPER_POSTER_PLANNING_PROMPT,
@@ -115,13 +116,13 @@ class ContentPlanner:
         self,
         api_key: str = None,
         base_url: str = None,
-        model: str = "gpt-4o",
+        model: str = None,
         max_tokens: int = None,
     ):
         import os
         self.api_key = api_key or os.getenv("RAG_LLM_API_KEY", "")
         self.base_url = base_url or os.getenv("RAG_LLM_BASE_URL")
-        self.model = model
+        self.model = model or get_llm_model(default="gpt-4o")
         # max_tokens: default 16000, override via RAG_LLM_MAX_TOKENS env or constructor
         # Note: deepseek has 8192 limit, set RAG_LLM_MAX_TOKENS=8192 if using deepseek
         self.max_tokens = max_tokens or int(os.getenv("RAG_LLM_MAX_TOKENS", "16000"))

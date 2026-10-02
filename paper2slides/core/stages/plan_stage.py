@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict
 
-from ...utils import load_json, save_json
+from ...utils import load_json, save_json, get_llm_model
 from ..paths import get_summary_checkpoint, get_plan_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ async def run_plan_stage(base_dir: Path, config_dir: Path, config: Dict) -> Dict
     logger.info("Planning content...")
     api_key = os.getenv("RAG_LLM_API_KEY", "")
     base_url = os.getenv("RAG_LLM_BASE_URL")
-    model = os.getenv("LLM_MODEL", "gpt-4o")
+    model = get_llm_model(default="gpt-4o")
 
     planner = ContentPlanner(api_key=api_key, base_url=base_url, model=model)
     plan = planner.plan(gen_input)

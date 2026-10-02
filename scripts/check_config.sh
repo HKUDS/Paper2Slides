@@ -67,6 +67,17 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
+# Check 4b: LLM_MODEL vs non-OpenAI base URL (issue #37)
+echo -n "Checking LLM_MODEL vs RAG_LLM_BASE_URL... "
+if [ -n "$RAG_LLM_BASE_URL" ] && [[ "$RAG_LLM_BASE_URL" != *"api.openai.com"* ]] && [ -z "$LLM_MODEL" ]; then
+    echo -e "${RED}✗${NC} RAG_LLM_BASE_URL points at $RAG_LLM_BASE_URL but LLM_MODEL is not set"
+    echo "   Set LLM_MODEL to the model name your endpoint serves (e.g. deepseek-v4-pro)."
+    echo "   Without it the pipeline falls back to gpt-4o-mini and the endpoint returns 400."
+    ERRORS=$((ERRORS + 1))
+else
+    echo -e "${GREEN}✓${NC} Consistent"
+fi
+
 # Check 5: Python dependencies
 echo -n "Checking Python dependencies... "
 if python3 -c "import fastapi, uvicorn" 2>/dev/null; then

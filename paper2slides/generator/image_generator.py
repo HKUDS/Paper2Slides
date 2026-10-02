@@ -5,6 +5,7 @@ Generate poster/slides images from ContentPlan.
 """
 import os
 import json
+import re
 import base64
 import time
 import logging
@@ -17,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import GenerationInput
 from .content_planner import ContentPlan, Section
+from ..utils import get_llm_model
 from ..prompts.image_generation import (
     STYLE_PROCESS_PROMPT,
     FORMAT_POSTER,
@@ -55,26 +57,44 @@ class ProcessedStyle:
 
 
 def process_custom_style(client: OpenAI, user_style: str, model: str = None) -> ProcessedStyle:
-    """Process user's custom style request with LLM."""
-    model = model or os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
+    """Process user's custom style request with LLM.
     
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": STYLE_PROCESS_PROMPT.format(user_style=user_style)}],
-            response_format={"type": "json_object"},
-        )
-        result = json.loads(response.choices[0].message.content)
-        return ProcessedStyle(
-            style_name=result.get("style_name", ""),
-            color_tone=result.get("color_tone", ""),
-            special_elements=result.get("special_elements", ""),
-            decorations=result.get("decorations", ""),
-            valid=result.get("valid", False),
-            error=result.get("error"),
-        )
-    except Exception as e:
-        return ProcessedStyle(style_name="", color_tone="", special_elements="", decorations="", valid=False, error=str(e))
+    Retries without response_format json_object when the model rejects it
+    (DeepSeek, local LLMs and many OpenAI-compatible servers don't support JSON mode).
+    """
+    model = model or get_llm_model()
+    
+    result, error = None, None
+    for use_json in [True, False]:
+        try:
+            kwargs = {
+                "model": model,
+                "messages": [{"role": "user", "content": STYLE_PROCESS_PROMPT.format(user_style=user_style)}],
+            }
+            if use_json:
+                kwargs["response_format"] = {"type": "json_object"}
+            response = client.chat.completions.create(**kwargs)
+            # Some models ignore response_format and wrap JSON in prose/markdown fences
+            content = response.choices[0].message.content
+            if not use_json and content and not content.strip().startswith("{"):
+                fenced = re.search(r"\{.*\}", content, re.DOTALL)
+                if fenced:
+                    content = fenced.group(0)
+            result = json.loads(content)
+            break
+        except Exception as e:
+            error = str(e)
+    
+    if result is None:
+        return ProcessedStyle(style_name="", color_tone="", special_elements="", decorations="", valid=False, error=error)
+    return ProcessedStyle(
+        style_name=result.get("style_name", ""),
+        color_tone=result.get("color_tone", ""),
+        special_elements=result.get("special_elements", ""),
+        decorations=result.get("decorations", ""),
+        valid=result.get("valid", False),
+        error=result.get("error"),
+    )
 
 
 class ImageGenerator:

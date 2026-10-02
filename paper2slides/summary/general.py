@@ -6,7 +6,7 @@ from typing import List
 from dataclasses import dataclass, field
 
 from .clean import clean_references
-from rag import RAGQueryResult
+from ..rag import RAGQueryResult
 
 
 @dataclass

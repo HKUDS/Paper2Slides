@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional, List
 from dotenv import load_dotenv
 
+from ..utils import get_llm_model
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=False)
@@ -37,9 +39,12 @@ class APIConfig:
     """Optional. If None, uses OpenAI official API. Set via RAG_LLM_BASE_URL env var."""
     
     llm_model: str = field(
-        default_factory=lambda: os.getenv("LLM_MODEL", "gpt-4o-mini")
+        default_factory=lambda: get_llm_model()
     )
-    
+    """Chat model name. Resolved via get_llm_model(): LLM_MODEL env wins; when
+    RAG_LLM_BASE_URL points off api.openai.com without LLM_MODEL a loud warning
+    is logged because the gpt-4o-mini fallback is rejected by most endpoints
+    (issue #37)."""
     embedding_model: str = field(
         default_factory=lambda: os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
     )
