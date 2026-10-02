@@ -15,6 +15,44 @@ from ..paths import get_rag_checkpoint
 logger = logging.getLogger(__name__)
 
 
+def _collect_markdown_files(output_dir: Path) -> List[str]:
+    """Return markdown files written under the parse output directory."""
+    return [str(path) for path in sorted(output_dir.rglob("*.md")) if path.is_file()]
+
+
+def _use_source_markdown(input_path: Path, output_dir: Path) -> List[str]:
+    """Keep .md/.txt uploads as markdown files when parsing writes none."""
+    if input_path.is_file():
+        sources = [input_path] if input_path.suffix.lower() in {".md", ".txt"} else []
+    elif input_path.is_dir():
+        sources = [
+            path
+            for path in sorted(input_path.rglob("*"))
+            if path.is_file() and path.suffix.lower() in {".md", ".txt"}
+        ]
+    else:
+        sources = []
+
+    written: List[str] = []
+    for source in sources:
+        dest = output_dir / f"{source.stem}.md"
+        if dest.resolve() == source.resolve():
+            written.append(str(dest))
+            continue
+        try:
+            text = source.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.warning(f"Could not read markdown file {source}: {exc}")
+            continue
+        if not text.strip():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+        logger.info(f"Using source markdown file: {dest}")
+        written.append(str(dest))
+    return written
+
+
 def _get_image_mime_type(image_path: str) -> str:
     """Get MIME type for image file based on extension"""
     ext = Path(image_path).suffix.lower()
@@ -304,13 +342,22 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
             recursive=True,
         )
         
-        logger.info(f"  Parsing completed: {len(parse_result.successful_files)} successful")
+        logger.info(
+            f"  Parsing completed: {len(parse_result.successful_files)} successful, "
+            f"{len(parse_result.failed_files)} failed"
+        )
         
-        # Collect markdown files
-        md_files = list(output_dir.rglob("*.md"))
-        markdown_paths = [str(f) for f in md_files]
+        # Collect markdown files written by the parser.
+        markdown_paths = _collect_markdown_files(output_dir)
+        if not markdown_paths:
+            # Keep text uploads as markdown files when MinerU writes none.
+            markdown_paths = _use_source_markdown(path, output_dir)
         
         if not markdown_paths:
+            # Keep the original error text and attach the parser reason.
+            reasons = [msg for msg in parse_result.errors.values() if msg]
+            if reasons:
+                raise ValueError("No markdown files generated: " + " | ".join(reasons))
             raise ValueError("No markdown files generated")
         
         logger.info(f"  Found {len(markdown_paths)} markdown file(s)")
@@ -371,8 +418,7 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
             logger.info(f"  Indexing completed: {batch_result.get('successful_rag_files', 0)} successful, {batch_result.get('failed_rag_files', 0)} failed")
             
             # Collect markdown paths from parser output
-            md_files = list(output_dir.rglob("*.md"))
-            markdown_paths = [str(f) for f in md_files]
+            markdown_paths = _collect_markdown_files(output_dir)
             
             if markdown_paths:
                 logger.info(f"  Found {len(markdown_paths)} markdown file(s)")

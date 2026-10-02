@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import argparse
 import base64
+import shutil
 import subprocess
 import tempfile
 import logging
@@ -30,6 +31,14 @@ from typing import (
 )
 
 T = TypeVar("T")
+
+
+def _output_has_markdown(output_dir: Union[str, Path]) -> bool:
+    """Return whether markdown files are already under the output directory."""
+    try:
+        return any(path.is_file() for path in Path(output_dir).rglob("*.md"))
+    except OSError:
+        return False
 
 
 class MineruExecutionError(Exception):
@@ -580,42 +589,80 @@ class MineruParser(Parser):
     # Class-level logger
     logger = logging.getLogger(__name__)
 
+    # "legacy" is `mineru -p/-o`. "parse" is MinerU 4.0 `mineru parse` / `mineru-kit`.
+    _mineru_cli_style: Optional[str] = None
+
+    # Directories MinerU writes markdown files into.
+    # pipeline -> auto/; vlm-* -> vlm/; hybrid-* -> hybrid_auto/.
+    # MinerU 4.0 writes markdown.md under flash|basic|standard|advanced.
+    _METHOD_DIR_NAMES = (
+        "auto",
+        "txt",
+        "ocr",
+        "vlm",
+        "hybrid_auto",
+        "hybrid_txt",
+        "hybrid_ocr",
+        "flash",
+        "basic",
+        "standard",
+        "advanced",
+    )
+
     def __init__(self) -> None:
         """Initialize MineruParser"""
         super().__init__()
 
+    @classmethod
+    def _detect_mineru_cli(cls) -> str:
+        """Tell legacy ``mineru -p/-o`` from MinerU 4.0 ``mineru parse``."""
+        if cls._mineru_cli_style:
+            return cls._mineru_cli_style
+
+        style = "legacy"
+        try:
+            result = subprocess.run(
+                ["mineru", "--help"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=30,
+            )
+            help_text = f"{result.stdout or ''}\n{result.stderr or ''}"
+            # `--path` is the legacy CLI. MinerU 4.0 only documents `parse`.
+            if "--path" in help_text or "-p," in help_text:
+                style = "legacy"
+            elif "parse" in help_text or shutil.which("mineru-kit"):
+                style = "parse"
+        except (OSError, subprocess.SubprocessError):
+            style = "legacy"
+
+        cls._mineru_cli_style = style
+        return style
+
     @staticmethod
-    def _run_mineru_command(
+    def _markdown_output_path(input_path: Union[str, Path], output_dir: Union[str, Path]) -> Path:
+        """Markdown path the parse CLI should write."""
+        return Path(output_dir) / f"{Path(input_path).stem}.md"
+
+    @classmethod
+    def _build_legacy_cmd(
+        cls,
         input_path: Union[str, Path],
         output_dir: Union[str, Path],
-        method: str = "auto",
-        lang: Optional[str] = None,
-        backend: Optional[str] = None,
-        start_page: Optional[int] = None,
-        end_page: Optional[int] = None,
-        formula: bool = True,
-        table: bool = True,
-        device: Optional[str] = None,
-        source: Optional[str] = None,
-        vlm_url: Optional[str] = None,
-    ) -> None:
-        """
-        Run mineru command line tool
-
-        Args:
-            input_path: Path to input file or directory
-            output_dir: Output directory path
-            method: Parsing method (auto, txt, ocr)
-            lang: Document language for OCR optimization
-            backend: Parsing backend
-            start_page: Starting page number (0-based)
-            end_page: Ending page number (0-based)
-            formula: Enable formula parsing
-            table: Enable table parsing
-            device: Inference device
-            source: Model source
-            vlm_url: When the backend is `vlm-sglang-client`, you need to specify the server_url
-        """
+        method: str,
+        lang: Optional[str],
+        backend: Optional[str],
+        start_page: Optional[int],
+        end_page: Optional[int],
+        formula: bool,
+        table: bool,
+        device: Optional[str],
+        source: Optional[str],
+        vlm_url: Optional[str],
+    ) -> List[str]:
+        """Build ``mineru -p ... -o ... -m ...``."""
         cmd = [
             "mineru",
             "-p",
@@ -625,7 +672,6 @@ class MineruParser(Parser):
             "-m",
             method,
         ]
-
         if backend:
             cmd.extend(["-b", backend])
         if source:
@@ -644,6 +690,192 @@ class MineruParser(Parser):
             cmd.extend(["-d", device])
         if vlm_url:
             cmd.extend(["-u", vlm_url])
+        return cmd
+
+    @classmethod
+    def _build_parse_cmd(
+        cls,
+        input_path: Union[str, Path],
+        output_dir: Union[str, Path],
+        tier: Optional[str] = None,
+    ) -> List[str]:
+        """Build a MinerU 4.0 command that writes a markdown file."""
+        md_path = cls._markdown_output_path(input_path, output_dir)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        is_pdf = Path(input_path).suffix.lower() == ".pdf"
+
+        if shutil.which("mineru-kit"):
+            cmd = ["mineru-kit", "parse", str(input_path), "-o", str(md_path)]
+            if is_pdf:
+                cmd.extend(["--pages", "all"])
+            if tier:
+                cmd.extend(["--tier", tier])
+            return cmd
+
+        cmd = ["mineru", "parse", str(input_path), "-o", str(md_path), "--wait", "600"]
+        if is_pdf:
+            cmd.extend(["--pages", "all"])
+        if tier:
+            cmd.extend(["--tier", tier])
+        return cmd
+
+    @classmethod
+    def _build_mineru_cmd(
+        cls,
+        input_path: Union[str, Path],
+        output_dir: Union[str, Path],
+        method: str,
+        lang: Optional[str],
+        backend: Optional[str],
+        start_page: Optional[int],
+        end_page: Optional[int],
+        formula: bool,
+        table: bool,
+        device: Optional[str],
+        source: Optional[str],
+        vlm_url: Optional[str],
+    ) -> List[str]:
+        if cls._detect_mineru_cli() == "parse":
+            return cls._build_parse_cmd(input_path, output_dir)
+        return cls._build_legacy_cmd(
+            input_path,
+            output_dir,
+            method,
+            lang,
+            backend,
+            start_page,
+            end_page,
+            formula,
+            table,
+            device,
+            source,
+            vlm_url,
+        )
+
+    @classmethod
+    def _fallback_mineru_command(
+        cls,
+        input_path: Union[str, Path],
+        output_dir: Union[str, Path],
+        method: str,
+        lang: Optional[str],
+        backend: Optional[str],
+        start_page: Optional[int],
+        end_page: Optional[int],
+        formula: bool,
+        table: bool,
+        device: Optional[str],
+        source: Optional[str],
+        vlm_url: Optional[str],
+        original_error: MineruExecutionError,
+    ) -> None:
+        """Retry once when parsing exits before markdown files are generated.
+
+        The pipeline backend writes markdown files under auto/.
+        MinerU 4.0 writes them through ``mineru parse`` / ``mineru-kit parse``.
+        """
+        cli_style = cls._detect_mineru_cli()
+        if cli_style == "legacy" and backend != "pipeline":
+            logging.warning(
+                "[MinerU] Command executed failed. Retrying with pipeline backend "
+                "so markdown files are generated under auto/."
+            )
+            cls._run_mineru_command(
+                input_path=input_path,
+                output_dir=output_dir,
+                method=method,
+                lang=lang,
+                backend="pipeline",
+                start_page=start_page,
+                end_page=end_page,
+                formula=formula,
+                table=table,
+                device=device,
+                source=source,
+                vlm_url=vlm_url,
+                allow_fallback=False,
+            )
+            return
+
+        logging.warning(
+            "[MinerU] Command executed failed. Retrying with mineru parse "
+            "so markdown files are generated."
+        )
+        cmd = cls._build_parse_cmd(input_path, output_dir, tier="flash")
+        logging.info(f"Executing mineru command: {' '.join(cmd)}")
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise original_error from exc
+
+        if result.returncode == 0 or _output_has_markdown(output_dir):
+            if result.returncode != 0:
+                logging.warning(
+                    "[MinerU] Command executed with stderr errors, "
+                    "but markdown files were generated"
+                )
+            else:
+                logging.info("[MinerU] Command executed successfully")
+            return
+
+        logging.info("[MinerU] Command executed failed")
+        raise original_error
+
+    @staticmethod
+    def _run_mineru_command(
+        input_path: Union[str, Path],
+        output_dir: Union[str, Path],
+        method: str = "auto",
+        lang: Optional[str] = None,
+        backend: Optional[str] = None,
+        start_page: Optional[int] = None,
+        end_page: Optional[int] = None,
+        formula: bool = True,
+        table: bool = True,
+        device: Optional[str] = None,
+        source: Optional[str] = None,
+        vlm_url: Optional[str] = None,
+        allow_fallback: bool = True,
+    ) -> None:
+        """
+        Run mineru command line tool
+
+        Args:
+            input_path: Path to input file or directory
+            output_dir: Output directory path
+            method: Parsing method (auto, txt, ocr)
+            lang: Document language for OCR optimization
+            backend: Parsing backend
+            start_page: Starting page number (0-based)
+            end_page: Ending page number (0-based)
+            formula: Enable formula parsing
+            table: Enable table parsing
+            device: Inference device
+            source: Model source
+            vlm_url: When the backend is `vlm-sglang-client`, you need to specify the server_url
+            allow_fallback: Retry when parsing writes no markdown files
+        """
+        cmd = MineruParser._build_mineru_cmd(
+            input_path=input_path,
+            output_dir=output_dir,
+            method=method,
+            lang=lang,
+            backend=backend,
+            start_page=start_page,
+            end_page=end_page,
+            formula=formula,
+            table=table,
+            device=device,
+            source=source,
+            vlm_url=vlm_url,
+        )
 
         output_lines = []
         error_lines = []
@@ -763,13 +995,37 @@ class MineruParser(Parser):
             stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
-            if return_code != 0 or error_lines:
+            # Keep a stderr "error" line from failing the parse when markdown files were generated.
+            md_generated = _output_has_markdown(output_dir)
+            if return_code != 0 or (error_lines and not md_generated):
                 logging.info("[MinerU] Command executed failed")
                 raise MineruExecutionError(return_code, error_lines)
+            if error_lines:
+                logging.warning(
+                    "[MinerU] Command executed with stderr errors, "
+                    "but markdown files were generated"
+                )
             else:
                 logging.info("[MinerU] Command executed successfully")
 
-        except MineruExecutionError:
+        except MineruExecutionError as exc:
+            if allow_fallback and not _output_has_markdown(output_dir):
+                MineruParser._fallback_mineru_command(
+                    input_path=input_path,
+                    output_dir=output_dir,
+                    method=method,
+                    lang=lang,
+                    backend=backend,
+                    start_page=start_page,
+                    end_page=end_page,
+                    formula=formula,
+                    table=table,
+                    device=device,
+                    source=source,
+                    vlm_url=vlm_url,
+                    original_error=exc,
+                )
+                return
             raise
         except subprocess.CalledProcessError as e:
             logging.error(f"Error running mineru subprocess command: {e}")
@@ -786,9 +1042,174 @@ class MineruParser(Parser):
             logging.error(error_message)
             raise RuntimeError(error_message) from e
 
+    @classmethod
+    def _candidate_output_dirs(
+        cls, output_dir: Path, file_stem: str, method: str
+    ) -> List[Path]:
+        """Directories to search for markdown files and the content list."""
+        ordered: List[Path] = []
+        seen = set()
+
+        def add(path: Path) -> None:
+            key = str(path)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(path)
+
+        names: List[str] = []
+        if method:
+            names.append(method)
+            if not str(method).startswith("hybrid_"):
+                names.append(f"hybrid_{method}")
+        names.extend(cls._METHOD_DIR_NAMES)
+
+        file_stem_subdir = output_dir / file_stem
+        if file_stem_subdir.is_dir():
+            for name in names:
+                add(file_stem_subdir / name)
+            add(file_stem_subdir)
+            for child in sorted(file_stem_subdir.iterdir()):
+                if child.is_dir():
+                    add(child)
+        add(output_dir)
+        return ordered
+
     @staticmethod
+    def _find_markdown_file(directory: Path, file_stem: str) -> Optional[Path]:
+        """Find stem.md, full.md, or markdown.md in one output directory."""
+        for name in (f"{file_stem}.md", "full.md", "markdown.md"):
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _find_content_list_file(directory: Path, file_stem: str) -> Optional[Path]:
+        """Find the content list. Prefer content_list_v2 over the legacy content list."""
+        for name in (
+            f"{file_stem}_content_list_v2.json",
+            "content_list_v2.json",
+            f"{file_stem}_content_list.json",
+            "content_list.json",
+        ):
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @staticmethod
+    def _flatten_content_list(raw_content: Any) -> List[Dict[str, Any]]:
+        """Flatten a content list, including page-grouped v2, into content blocks."""
+        if isinstance(raw_content, dict):
+            for key in ("content_list", "pdf_info"):
+                if key in raw_content:
+                    return MineruParser._flatten_content_list(raw_content[key])
+            return []
+        if not isinstance(raw_content, list):
+            return []
+
+        blocks: List[Dict[str, Any]] = []
+        for item in raw_content:
+            if isinstance(item, list):
+                blocks.extend(
+                    block for block in item if isinstance(block, dict)
+                )
+            elif isinstance(item, dict):
+                blocks.append(item)
+        return blocks
+
+    @staticmethod
+    def _caption_text(item: Dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, list):
+                value = " ".join(str(part) for part in value if part)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    @staticmethod
+    def _block_text(item: Dict[str, Any]) -> str:
+        text = item.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        content = item.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for span in content:
+                if isinstance(span, str) and span.strip():
+                    parts.append(span.strip())
+                elif isinstance(span, dict):
+                    span_text = span.get("content") or span.get("text") or ""
+                    if isinstance(span_text, str) and span_text.strip():
+                        parts.append(span_text.strip())
+            return " ".join(parts).strip()
+        return ""
+
+    @classmethod
+    def _markdown_image_target(cls, img_path: str, md_dir: Path) -> str:
+        """Image path relative to the markdown file, keeping images/."""
+        path = Path(img_path)
+        if not path.is_absolute():
+            return img_path.replace("\\", "/")
+        try:
+            return path.resolve().relative_to(md_dir.resolve()).as_posix()
+        except ValueError:
+            parts = path.parts
+            if "images" in parts:
+                return "/".join(parts[parts.index("images") :])
+            return path.as_posix()
+
+    @classmethod
+    def _content_blocks_to_markdown(
+        cls, content_list: List[Dict[str, Any]], md_dir: Path
+    ) -> str:
+        """Turn content blocks into the markdown file fast mode reads."""
+        parts: List[str] = []
+        for item in content_list:
+            if not isinstance(item, dict):
+                continue
+            content_type = item.get("type", "text")
+            if content_type in ("text", "title", "header", "list"):
+                text = cls._block_text(item)
+                if text:
+                    parts.append(text)
+                continue
+            if content_type == "equation":
+                latex = cls._block_text(item) or str(item.get("latex") or "").strip()
+                if latex:
+                    parts.append(f"$$\n{latex}\n$$")
+                continue
+            if content_type == "table":
+                caption = cls._caption_text(item, "table_caption", "caption")
+                body = item.get("table_body") or ""
+                if isinstance(body, str) and body.strip():
+                    chunk = body.strip()
+                    if caption:
+                        chunk = f"{caption}\n\n{chunk}"
+                    parts.append(chunk)
+                elif caption:
+                    parts.append(caption)
+                continue
+            if content_type == "image":
+                img_path = item.get("img_path") or ""
+                if not img_path:
+                    continue
+                caption = cls._caption_text(
+                    item, "image_caption", "img_caption", "caption"
+                )
+                target = cls._markdown_image_target(str(img_path), md_dir)
+                alt = caption or "image"
+                parts.append(f"![{alt}]({target})")
+                if caption:
+                    parts.append(caption)
+        return "\n\n".join(parts).strip()
+
+    @classmethod
     def _read_output_files(
-        output_dir: Path, file_stem: str, method: str = "auto"
+        cls, output_dir: Path, file_stem: str, method: str = "auto"
     ) -> Tuple[List[Dict[str, Any]], str]:
         """
         Read the output files generated by mineru
@@ -796,24 +1217,36 @@ class MineruParser(Parser):
         Args:
             output_dir: Output directory
             file_stem: File name without extension
+            method: Parsing method (auto, txt, ocr, vlm, hybrid_auto)
 
         Returns:
             Tuple containing (content list JSON, Markdown text)
         """
-        # Look for the generated files
-        md_file = output_dir / f"{file_stem}.md"
-        json_file = output_dir / f"{file_stem}_content_list.json"
+        # Look for the generated files under auto/, hybrid_auto/, vlm/, or markdown.md.
+        md_file: Optional[Path] = None
+        json_file: Optional[Path] = None
         images_base_dir = output_dir  # Base directory for images
 
-        file_stem_subdir = output_dir / file_stem
-        if file_stem_subdir.exists():
-            md_file = file_stem_subdir / method / f"{file_stem}.md"
-            json_file = file_stem_subdir / method / f"{file_stem}_content_list.json"
-            images_base_dir = file_stem_subdir / method
+        for directory in cls._candidate_output_dirs(output_dir, file_stem, method):
+            found_md = cls._find_markdown_file(directory, file_stem)
+            found_json = cls._find_content_list_file(directory, file_stem)
+            # Keep the directory that has both the markdown file and the content list.
+            if found_md and found_json:
+                md_file = found_md
+                json_file = found_json
+                images_base_dir = directory
+                break
+            if found_md is not None and md_file is None:
+                md_file = found_md
+                images_base_dir = directory
+            if found_json is not None and json_file is None:
+                json_file = found_json
+                if md_file is None:
+                    images_base_dir = directory
 
         # Read markdown content
         md_content = ""
-        if md_file.exists():
+        if md_file is not None and md_file.exists():
             try:
                 with open(md_file, "r", encoding="utf-8") as f:
                     md_content = f.read()
@@ -821,11 +1254,12 @@ class MineruParser(Parser):
                 logging.warning(f"Could not read markdown file {md_file}: {e}")
 
         # Read JSON content list
-        content_list = []
-        if json_file.exists():
+        content_list: List[Dict[str, Any]] = []
+        if json_file is not None and json_file.exists():
             try:
                 with open(json_file, "r", encoding="utf-8") as f:
-                    content_list = json.load(f)
+                    raw_content = json.load(f)
+                content_list = cls._flatten_content_list(raw_content)
 
                 # Always fix relative paths in content_list to absolute paths
                 logging.info(
@@ -850,6 +1284,21 @@ class MineruParser(Parser):
 
             except Exception as e:
                 logging.warning(f"Could not read JSON file {json_file}: {e}")
+
+        # Fast mode needs a markdown file. Write one from the content blocks when MinerU did not.
+        if content_list and not md_content.strip():
+            generated = cls._content_blocks_to_markdown(content_list, images_base_dir)
+            if generated:
+                md_file = images_base_dir / f"{file_stem}.md"
+                try:
+                    md_file.parent.mkdir(parents=True, exist_ok=True)
+                    md_file.write_text(generated + "\n", encoding="utf-8")
+                    md_content = generated
+                    logging.info(
+                        f"Generated markdown file from content blocks: {md_file}"
+                    )
+                except OSError as e:
+                    logging.warning(f"Could not write markdown file {md_file}: {e}")
 
         return content_list, md_content
 
@@ -899,10 +1348,13 @@ class MineruParser(Parser):
                 **kwargs,
             )
 
-            # Read the generated output files
-            backend = kwargs.get("backend", "")
+            # Read the generated output files.
+            # pipeline -> auto/, vlm-* -> vlm/, hybrid-* -> hybrid_auto/.
+            backend = kwargs.get("backend") or ""
             if backend.startswith("vlm-"):
                 method = "vlm"
+            elif backend.startswith("hybrid-"):
+                method = "hybrid_auto"
 
             content_list, _ = self._read_output_files(
                 base_output_dir, name_without_suff, method=method
