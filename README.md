@@ -288,6 +288,16 @@ outputs/
 | `doraemon` | Colorful, friendly style with illustrations |
 | `custom` | Any text description for LLM-generated style |
 
+### Figure Curation (Preserve Mode)
+
+| `FIGURE_MODE` | Behavior |
+|---------------|----------|
+| unset (default) | Reference figures are **redrawn** to match the slide/poster style |
+| `preserve` | Published figures pass through **pixel-faithful** — no redrawing, restyling or recoloring; only layout, captions and text adapt |
+
+> [!TIP]
+> Set `FIGURE_MODE=preserve` in `paper2slides/.env` when the figures ARE the content — systematic reviews, clinical evidence decks, or any paper where redrawing published panels would falsify the data. Original axes, scale bars, legends and panel labels are preserved unchanged.
+
 ### Image Generation Providers
 
 - Set `IMAGE_GEN_PROVIDER` in `paper2slides/.env` to choose the backend:

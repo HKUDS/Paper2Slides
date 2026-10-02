@@ -32,6 +32,8 @@ from ..prompts.image_generation import (
     CONSISTENCY_HINT,
     SLIDE_FIGURE_HINT,
     POSTER_FIGURE_HINT,
+    SLIDE_FIGURE_HINT_PRESERVE,
+    POSTER_FIGURE_HINT_PRESERVE,
 )
 
 
@@ -109,6 +111,16 @@ class ImageGenerator:
             self.client = None
         else:
             raise ValueError(f"Unsupported image generation provider: {self.provider}")
+    
+    @staticmethod
+    def _preserve_figures() -> bool:
+        """FIGURE_MODE=preserve keeps published reference figures untouched (issue #40).
+        
+        For figure-curation decks (systematic reviews, clinical evidence) redrawing
+        published panels would falsify the data -- pass them through pixel-faithful
+        and only style the surrounding layout, captions and text.
+        """
+        return os.getenv("FIGURE_MODE", "").strip().lower() == "preserve"
     
     def generate(
         self,
@@ -301,7 +313,7 @@ class ImageGenerator:
             parts.append(POSTER_STYLE_HINTS.get(style_name, POSTER_STYLE_HINTS["academic"]))
         
         parts.append(VISUALIZATION_HINTS)
-        parts.append(POSTER_FIGURE_HINT)
+        parts.append(POSTER_FIGURE_HINT_PRESERVE if self._preserve_figures() else POSTER_FIGURE_HINT)
         parts.append(f"---\nContent:\n{sections_md}")
         
         return "\n\n".join(parts)
@@ -322,7 +334,7 @@ class ImageGenerator:
         
         parts.append(VISUALIZATION_HINTS)
         parts.append(CONSISTENCY_HINT)
-        parts.append(SLIDE_FIGURE_HINT)
+        parts.append(SLIDE_FIGURE_HINT_PRESERVE if self._preserve_figures() else SLIDE_FIGURE_HINT)
         
         parts.append(slide_info)
         parts.append(f"---\nFull presentation context:\n{context_md}")

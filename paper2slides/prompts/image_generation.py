@@ -137,3 +137,10 @@ CONSISTENCY_HINT = "IMPORTANT: Maintain consistent colors and style with the ref
 SLIDE_FIGURE_HINT = "For reference figures: REDRAW them to match the visual style and color scheme. Preserve the original structure and key information, but make them BLEND seamlessly with the slide design."
 
 POSTER_FIGURE_HINT = "For reference figures: REDRAW them to match the visual style and color scheme. Preserve the original structure and key information, but make them BLEND seamlessly with the poster design."
+
+# FIGURE_MODE=preserve: keep published reference figures untouched (issue #40).
+# For figure-curation decks (systematic reviews, clinical evidence) the figures ARE
+# the content -- redrawing or restyling published panels would falsify the data.
+SLIDE_FIGURE_HINT_PRESERVE = "For reference figures: THIS IS A FIGURE-CURATION DECK. Figures are actual published research panels and must appear EXACTLY as in the source. Do NOT redraw, restyle, recolor or recreate them. Reproduce every panel pixel-faithful: keep axes, scale bars, legends, color coding, panel labels and annotations unchanged. Figures should occupy the majority of the slide. Only the surrounding layout, captions and text adapt to the slide style. Never generate or invent replacement illustrations. This supersedes any earlier instruction about redrawing or restyling figures."
+
+POSTER_FIGURE_HINT_PRESERVE = "For reference figures: THIS IS A FIGURE-CURATION POSTER. Figures are actual published research panels and must appear EXACTLY as in the source. Do NOT redraw, restyle, recolor or recreate them. Reproduce every panel pixel-faithful: keep axes, scale bars, legends, color coding, panel labels and annotations unchanged. Figures should occupy the majority of the poster area. Only the surrounding layout, captions and text adapt to the poster style. Never generate or invent replacement illustrations. This supersedes any earlier instruction about redrawing or restyling figures."
