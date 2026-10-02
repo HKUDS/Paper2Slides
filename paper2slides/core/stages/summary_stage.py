@@ -59,7 +59,7 @@ async def run_summary_stage(base_dir: Path, config: Dict) -> Dict:
         content = await extract_paper(
             rag_results=rag_results,
             llm_client=llm_client,
-            model="gpt-4o-mini",
+            model=model,
             parallel=True,
             max_concurrency=5,
         )
@@ -71,7 +71,7 @@ async def run_summary_stage(base_dir: Path, config: Dict) -> Dict:
         content = await extract_general(
             rag_results=all_results,
             llm_client=llm_client,
-            model="gpt-4o-mini",
+            model=model,
         )
         summary_text = content.content
     

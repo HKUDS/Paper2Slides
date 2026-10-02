@@ -126,7 +126,8 @@ async def _run_fast_queries_by_category(
     max_concurrency: int = 10,
 ) -> Dict[str, List[Dict]]:
     """
-    Fast mode: Direct GPT-4o queries with markdown content and images in original positions
+    Fast mode: Direct LLM queries with markdown content and images in original positions
+    (model must be vision-capable, e.g. gpt-4o; local servers need a VL model like qwen2.5-vl)
     
     Args:
         client: OpenAI client
@@ -317,7 +318,8 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
         
         # Use OpenAI to query markdown content directly
         logger.info("")
-        logger.info(f"Running queries with GPT-4o and images ({content_type})...")
+        model = os.getenv("LLM_MODEL", "gpt-4o")
+        logger.info(f"Running queries with {model} and images ({content_type})...")
         
         from openai import OpenAI
         
@@ -325,13 +327,14 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
         base_url = os.getenv("RAG_LLM_BASE_URL")
         client = OpenAI(api_key=api_key, base_url=base_url)
         
-        # Execute queries (direct GPT-4o with images in original positions)
+        # Execute queries (direct LLM with images in original positions)
         if content_type == "paper":
             rag_results = await _run_fast_queries_by_category(
                 client=client,
                 markdown_content="",  # Not used anymore, content is processed inside
                 markdown_paths=markdown_paths,
                 queries_by_category=RAG_PAPER_QUERIES,
+                model=model,
             )
         else:
             raise ValueError("Fast mode currently only supports content_type='paper'")

@@ -112,6 +112,7 @@ Examples from <a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2: Pushing 
 - [🎯 Quick Start](#-quick-start)
 - [🏗️ Paper2Slides Framework](#%EF%B8%8F-paper2slides-framework)
 - [🔧 Configuration](#%EF%B8%8F-configuration)
+- [🤖 Using a Local LLM](#-using-a-local-llm)
 - [📁 Code Structure](#-code-structure)
 
 ---
@@ -287,6 +288,53 @@ outputs/
 | `academic` | Clean, professional academic presentation style |
 | `doraemon` | Colorful, friendly style with illustrations |
 | `custom` | Any text description for LLM-generated style |
+
+### 🤖 Using a Local LLM
+
+Paper2Slides works with any **OpenAI-compatible** endpoint — run the whole pipeline fully local with [Ollama](https://ollama.com), LM Studio, vLLM, llama.cpp server, or SGLang. [Issue #33](https://github.com/HKUDS/Paper2Slides/issues/33)
+
+Configure `paper2slides/.env` (Ollama example):
+
+```env
+# Chat LLM (RAG queries, summary, content planning)
+RAG_LLM_BASE_URL="http://localhost:11434/v1"
+LLM_MODEL="qwen2.5:14b"
+RAG_LLM_API_KEY=""     # can stay empty for local servers
+
+# Embeddings (used by RAG indexing, normal mode only)
+EMBEDDING_MODEL="nomic-embed-text"
+EMBEDDING_DIM="768"    # must match the embedding model's native dimension
+
+# max_tokens: fit your model's context window (default 16000)
+RAG_LLM_MAX_TOKENS="8192"
+```
+
+| Model role | Env vars | Notes |
+|------------|----------|-------|
+| Chat / summary / planning | `RAG_LLM_BASE_URL`, `LLM_MODEL`, `RAG_LLM_API_KEY` | Any OpenAI-compatible server |
+| Embeddings (RAG indexing) | `EMBEDDING_MODEL`, `EMBEDDING_DIM` | Required for normal mode; `--fast` skips RAG indexing |
+| `--fast` mode queries | same as chat | Needs a **vision** model (e.g. `qwen2.5-vl`, `llama3.2-vision`) — document images are sent inline |
+| Image generation | `IMAGE_GEN_*` | Always requires an image-capable model; openrouter provider accepts any OpenAI-compatible base URL |
+
+> [!NOTE]
+> `LLM_MODEL` now applies to **every** stage — RAG queries, summary extraction, content planning, and custom-style parsing. Previously some stages hardcoded `gpt-4o-mini` / `gpt-4o` and crashed with local models. Custom-style parsing also retries without JSON mode for local LLMs that don't support `response_format`.
+
+Example:
+
+```bash
+# Serve models (Ollama example)
+ollama pull qwen2.5:14b
+ollama pull nomic-embed-text
+
+# Fully local run, normal mode (RAG pipeline)
+python -m paper2slides --input paper.pdf --output slides --length medium
+
+# Fully local run, fast mode (needs a local vision model, no embeddings)
+python -m paper2slides --input paper.pdf --output slides --fast
+```
+
+> [!TIP]
+> `EMBEDDING_DIM` must match your embedding model (`nomic-embed-text` → 768). A mismatch breaks RAG vector storage — when switching models, start fresh with `--from-stage rag` (or delete the `rag_storage/` dir of your output).
 
 ### Image Generation Providers
 
