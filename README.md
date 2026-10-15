@@ -293,7 +293,10 @@ outputs/
 - Set `IMAGE_GEN_PROVIDER` in `paper2slides/.env` to choose the backend:
   - `openrouter` (default): uses `IMAGE_GEN_API_KEY`, `IMAGE_GEN_BASE_URL`, and `IMAGE_GEN_MODEL` (default `google/gemini-3-pro-image-preview`)
   - `google`: uses the official Gemini API at `GOOGLE_GENAI_BASE_URL` (default `https://generativelanguage.googleapis.com/v1beta`), `IMAGE_GEN_API_KEY`, `IMAGE_GEN_MODEL` (default `models/gemini-3-pro-image-preview`, must be image-capable), and `IMAGE_GEN_RESPONSE_MIME_TYPE` (default `text/plain`; use text types if your model does not support image responses)
-- Reference figures are sent as inline data when supported (Google) or as `image_url` attachments (OpenRouter).
+  - `atlas`: uses [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=paper2slides) with `IMAGE_GEN_API_KEY`, `IMAGE_GEN_BASE_URL` (default `https://api.atlascloud.ai/api/v1/model`) and `IMAGE_GEN_MODEL` (default `google/nano-banana-pro/text-to-image`). Images go through Atlas's async media API (submit, then poll), which is why this is a separate branch rather than an `IMAGE_GEN_BASE_URL` override on the `openrouter` path — verified: its image models are not reachable from `/v1/chat/completions`. Custom styles still work on this provider because the style-processing LLM call uses Atlas's OpenAI-compatible chat endpoint.
+- Reference figures are sent as inline data when supported (Google, Atlas) or as `image_url` attachments (OpenRouter).
+
+**Atlas size controls differ per model family (measured, not copied from docs):** `nano-banana` models ignore `size` and honour `aspect_ratio` (`IMAGE_GEN_ASPECT_RATIO`, default `16:9` for slides), while `seedream` models honour an explicit `size` (`IMAGE_GEN_SIZE`) and reject anything under 921600 pixels. A run that passes reference figures switches to the model's `/edit` task automatically. The returned container is not fixed — the same model returned PNG on one call and JPEG on the next — so the mime type comes from the response rather than being assumed.
 
 ### Image Generation Notes
 

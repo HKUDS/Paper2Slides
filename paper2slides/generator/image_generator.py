@@ -54,6 +54,22 @@ class ProcessedStyle:
     error: Optional[str] = None
 
 
+def _sniff_mime(content: bytes) -> str:
+    """Name the container after the bytes.
+
+    Verified: the same Atlas model returned PNG on one call and JPEG on the
+    next, so the container cannot be assumed from the model id. The response
+    Content-Type is used first and this is the fallback.
+    """
+    if content[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if content[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
 def process_custom_style(client: OpenAI, user_style: str, model: str = None) -> ProcessedStyle:
     """Process user's custom style request with LLM."""
     model = model or os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
@@ -77,6 +93,21 @@ def process_custom_style(client: OpenAI, user_style: str, model: str = None) -> 
         return ProcessedStyle(style_name="", color_tone="", special_elements="", decorations="", valid=False, error=str(e))
 
 
+# Atlas Cloud serves images through an async submit-then-poll media API, and its
+# OpenAI-compatible chat endpoint separately. Verified against the live service:
+# the image models are not reachable from /v1/chat/completions (400), so this
+# provider posts to the media API instead of reusing the OpenAI client.
+ATLAS_DEFAULT_BASE_URL = "https://api.atlascloud.ai/api/v1/model"
+ATLAS_CHAT_BASE_URL = "https://api.atlascloud.ai/v1"
+ATLAS_DEFAULT_MODEL = "google/nano-banana-pro/text-to-image"
+ATLAS_EDIT_SUFFIX = "/edit"
+ATLAS_POLL_INTERVAL = 5
+ATLAS_POLL_TIMEOUT = 600
+# api.atlascloud.ai answers some clients' default User-Agent with 403 (error
+# code 1010), so every request sends an explicit one.
+ATLAS_USER_AGENT = "paper2slides/1"
+
+
 class ImageGenerator:
     """Generate poster/slides images from ContentPlan."""
     
@@ -91,7 +122,8 @@ class ImageGenerator:
     ):
         self.provider = (provider or os.getenv("IMAGE_GEN_PROVIDER", "openrouter")).lower()
         self.api_key = api_key or os.getenv("IMAGE_GEN_API_KEY", "")
-        self.base_url = base_url or os.getenv("IMAGE_GEN_BASE_URL", "https://openrouter.ai/api/v1")
+        default_base_url = ATLAS_DEFAULT_BASE_URL if self.provider == "atlas" else "https://openrouter.ai/api/v1"
+        self.base_url = base_url or os.getenv("IMAGE_GEN_BASE_URL", default_base_url)
         self.google_api_base_url = (google_api_base_url or os.getenv("GOOGLE_GENAI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")).rstrip("/")
         self.response_mime_type = response_mime_type or os.getenv("IMAGE_GEN_RESPONSE_MIME_TYPE", "text/plain")
         self.model = model or os.getenv("IMAGE_GEN_MODEL")
@@ -100,6 +132,10 @@ class ImageGenerator:
             if self.provider == "google":
                 # Official Gemini API image-capable default
                 self.model = "models/gemini-1.5-flash"
+            elif self.provider == "atlas":
+                # Best text rendering of the Atlas image models, and it honours
+                # aspect_ratio, which matters for 16:9 slides.
+                self.model = ATLAS_DEFAULT_MODEL
             else:
                 self.model = "google/gemini-3-pro-image-preview"
         
@@ -107,6 +143,14 @@ class ImageGenerator:
             self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         elif self.provider == "google":
             self.client = None
+        elif self.provider == "atlas":
+            # Images go through the async media API below, but the OpenAI-compatible
+            # chat endpoint is still used for custom-style processing, so custom
+            # styles keep working on this provider.
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=os.getenv("ATLAS_CHAT_BASE_URL", ATLAS_CHAT_BASE_URL),
+            )
         else:
             raise ValueError(f"Unsupported image generation provider: {self.provider}")
     
@@ -405,6 +449,8 @@ class ImageGenerator:
         """Call image generation provider based on configuration."""
         if self.provider == "google":
             return self._call_model_google(prompt, reference_images)
+        if self.provider == "atlas":
+            return self._call_model_atlas(prompt, reference_images)
         return self._call_model_openrouter(prompt, reference_images)
     
     def _call_model_openrouter(self, prompt: str, reference_images: List[dict]) -> tuple:
@@ -478,6 +524,121 @@ class ImageGenerator:
                     continue
                 raise
         
+        raise RuntimeError("Image generation failed after all retry attempts")
+    
+    @staticmethod
+    def _atlas_edit_model(model: str) -> str:
+        """Map an Atlas model id to its edit-task sibling.
+
+        `vendor/model/text-to-image[-x]` -> `vendor/model/edit[-x]`,
+        `vendor/model/sequential` -> `vendor/model/edit-sequential`, and an id
+        without a task segment (`bytedance/seedream-v4`) gets `/edit` appended.
+        """
+        parts = model.split("/")
+        if len(parts) < 3:
+            return model + ATLAS_EDIT_SUFFIX
+        task = parts[-1]
+        if task.startswith("text-to-image"):
+            parts[-1] = "edit" + task[len("text-to-image"):]
+        elif task == "sequential":
+            parts[-1] = "edit-sequential"
+        else:
+            parts[-1] = "edit"
+        return "/".join(parts)
+
+    def _call_model_atlas(self, prompt: str, reference_images: List[dict]) -> tuple:
+        """Call Atlas Cloud's media API: submit a job, poll it, return the bytes.
+
+        Reference images travel in the `images` array field, and the model id
+        selects the task, so a run with references switches to the model's edit
+        task.
+        """
+        logger = logging.getLogger(__name__)
+        base_url = self.base_url.rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": ATLAS_USER_AGENT,
+        }
+
+        model = self.model
+        images = [
+            f"data:{img['mime_type']};base64,{img['base64']}"
+            for img in reference_images
+            if img.get("base64") and img.get("mime_type")
+        ]
+        if images and not model.endswith(ATLAS_EDIT_SUFFIX):
+            model = self._atlas_edit_model(model)
+
+        payload = {"model": model, "prompt": prompt}
+        # Measured: nano-banana models ignore `size` and honour `aspect_ratio`,
+        # while seedream models honour `size` (and reject anything under
+        # 921600 pixels). Send the one the configured model actually reads.
+        if "nano-banana" in model:
+            payload["aspect_ratio"] = os.getenv("IMAGE_GEN_ASPECT_RATIO", "16:9")
+        elif os.getenv("IMAGE_GEN_SIZE"):
+            payload["size"] = os.getenv("IMAGE_GEN_SIZE").replace("x", "*")
+        if images:
+            payload["images"] = images
+
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Calling Atlas image API (attempt {attempt + 1}/{max_retries})...")
+                submitted = requests.post(
+                    f"{base_url}/generateImage", headers=headers, json=payload, timeout=120
+                )
+                if submitted.status_code >= 400:
+                    raise RuntimeError(
+                        f"Atlas submit failed ({submitted.status_code}): {submitted.text[:300]}"
+                    )
+                prediction_id = (submitted.json().get("data") or {}).get("id")
+                if not prediction_id:
+                    raise RuntimeError(f"Atlas returned no prediction id: {submitted.text[:300]}")
+
+                deadline = time.monotonic() + ATLAS_POLL_TIMEOUT
+                while True:
+                    time.sleep(ATLAS_POLL_INTERVAL)
+                    polled = requests.get(
+                        f"{base_url}/prediction/{prediction_id}", headers=headers, timeout=120
+                    )
+                    if polled.status_code >= 400:
+                        raise RuntimeError(
+                            f"Atlas poll failed ({polled.status_code}): {polled.text[:300]}"
+                        )
+                    data = polled.json().get("data") or {}
+                    status = data.get("status")
+                    if status == "completed":
+                        outputs = data.get("outputs") or []
+                        if not outputs:
+                            raise RuntimeError("Atlas completed without an image URL")
+                        # The result URL is short-lived, so download it right away.
+                        downloaded = requests.get(
+                            outputs[0], headers={"User-Agent": ATLAS_USER_AGENT}, timeout=300
+                        )
+                        downloaded.raise_for_status()
+                        content = downloaded.content
+                        mime_type = downloaded.headers.get("Content-Type") or _sniff_mime(content)
+                        logger.info("Image generation successful")
+                        return content, mime_type
+                    if status == "failed":
+                        raise RuntimeError(f"Atlas generation failed: {data.get('error') or data}")
+                    if time.monotonic() > deadline:
+                        raise RuntimeError(
+                            f"Atlas prediction {prediction_id} still {status} after {ATLAS_POLL_TIMEOUT}s"
+                        )
+
+            except Exception as e:
+                logger.error(
+                    f"Error in Atlas API call (attempt {attempt + 1}/{max_retries}): {str(e)}"
+                )
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                raise
+
         raise RuntimeError("Image generation failed after all retry attempts")
     
     def _call_model_google(self, prompt: str, reference_images: List[dict]) -> tuple:
