@@ -106,7 +106,6 @@ ATLAS_POLL_TIMEOUT = 600
 # api.atlascloud.ai answers some clients' default User-Agent with 403 (error
 # code 1010), so every request sends an explicit one.
 ATLAS_USER_AGENT = "paper2slides/1"
-ATLAS_ASPECT_RATIO = os.getenv("IMAGE_GEN_ASPECT_RATIO", "16:9")
 
 
 class ImageGenerator:
@@ -527,12 +526,32 @@ class ImageGenerator:
         
         raise RuntimeError("Image generation failed after all retry attempts")
     
+    @staticmethod
+    def _atlas_edit_model(model: str) -> str:
+        """Map an Atlas model id to its edit-task sibling.
+
+        `vendor/model/text-to-image[-x]` -> `vendor/model/edit[-x]`,
+        `vendor/model/sequential` -> `vendor/model/edit-sequential`, and an id
+        without a task segment (`bytedance/seedream-v4`) gets `/edit` appended.
+        """
+        parts = model.split("/")
+        if len(parts) < 3:
+            return model + ATLAS_EDIT_SUFFIX
+        task = parts[-1]
+        if task.startswith("text-to-image"):
+            parts[-1] = "edit" + task[len("text-to-image"):]
+        elif task == "sequential":
+            parts[-1] = "edit-sequential"
+        else:
+            parts[-1] = "edit"
+        return "/".join(parts)
+
     def _call_model_atlas(self, prompt: str, reference_images: List[dict]) -> tuple:
         """Call Atlas Cloud's media API: submit a job, poll it, return the bytes.
 
-        Reference images travel in one newline-separated `images` field, and the
-        model id selects the task, so a run with references switches to the
-        model's edit task.
+        Reference images travel in the `images` array field, and the model id
+        selects the task, so a run with references switches to the model's edit
+        task.
         """
         logger = logging.getLogger(__name__)
         base_url = self.base_url.rstrip("/")
@@ -549,18 +568,18 @@ class ImageGenerator:
             if img.get("base64") and img.get("mime_type")
         ]
         if images and not model.endswith(ATLAS_EDIT_SUFFIX):
-            model = model.rsplit("/", 1)[0] + ATLAS_EDIT_SUFFIX
+            model = self._atlas_edit_model(model)
 
         payload = {"model": model, "prompt": prompt}
         # Measured: nano-banana models ignore `size` and honour `aspect_ratio`,
         # while seedream models honour `size` (and reject anything under
         # 921600 pixels). Send the one the configured model actually reads.
         if "nano-banana" in model:
-            payload["aspect_ratio"] = ATLAS_ASPECT_RATIO
+            payload["aspect_ratio"] = os.getenv("IMAGE_GEN_ASPECT_RATIO", "16:9")
         elif os.getenv("IMAGE_GEN_SIZE"):
             payload["size"] = os.getenv("IMAGE_GEN_SIZE").replace("x", "*")
         if images:
-            payload["images"] = "\n".join(images)
+            payload["images"] = images
 
         max_retries = 3
         retry_delay = 2  # seconds
