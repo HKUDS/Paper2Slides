@@ -23,6 +23,9 @@ async def run_pipeline(base_dir: Path, config_dir: Path, config: Dict, from_stag
         from_stage: Stage to start from
         session_id: Session ID for cancellation tracking
         session_manager: Session manager to check cancellation status
+
+    Returns:
+        True if every requested stage completed; False if a stage failed.
     """
     
     # Initialize or load state
@@ -44,6 +47,7 @@ async def run_pipeline(base_dir: Path, config_dir: Path, config: Dict, from_stag
     start_idx = STAGES.index(from_stage)
     logger.info("")
     logger.info(f"Starting from stage: {from_stage}")
+    success = True
     
     for i in range(start_idx, len(STAGES)):
         # Check if cancelled before starting each stage
@@ -78,6 +82,7 @@ async def run_pipeline(base_dir: Path, config_dir: Path, config: Dict, from_stag
             state["error"] = str(e)
             save_state(config_dir, state)
             logger.error(f"Stage failed: {e}", exc_info=True)
+            success = False
             break
     
     # Print summary
@@ -86,6 +91,8 @@ async def run_pipeline(base_dir: Path, config_dir: Path, config: Dict, from_stag
         status = state["stages"].get(stage, "pending")
         icon = "✓" if status == "completed" else "✗" if status == "failed" else "○"
         logger.info(f"  [{icon}] {stage}: {status}")
+
+    return success
 
 
 def list_outputs(output_dir: str):
