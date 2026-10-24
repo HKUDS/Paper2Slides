@@ -122,7 +122,9 @@ def main():
         logger.info(f"Reusing existing checkpoints, starting from: {from_stage}")
     
     # Run pipeline (CLI mode: no session_id or session_manager for cancellation)
-    asyncio.run(run_pipeline(base_dir, config_dir, config, from_stage))
+    pipeline_succeeded = asyncio.run(run_pipeline(base_dir, config_dir, config, from_stage))
+    if not pipeline_succeeded:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
