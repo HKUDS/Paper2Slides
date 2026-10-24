@@ -43,7 +43,18 @@ def create_state(config: Dict) -> Dict:
 def detect_start_stage(base_dir: Path, config_dir: Path, config: Dict) -> str:
     """Detect which stage to start from based on existing checkpoints."""
     # Check mode-specific checkpoints
-    if not get_rag_checkpoint(base_dir, config).exists():
+    rag_checkpoint_path = get_rag_checkpoint(base_dir, config)
+    if not rag_checkpoint_path.exists():
+        return "rag"
+
+    rag_checkpoint = load_json(rag_checkpoint_path)
+    checkpoint_input = (
+        rag_checkpoint.get("input_path") if isinstance(rag_checkpoint, dict) else None
+    )
+    current_input = config.get("input_path")
+    if not checkpoint_input or not current_input:
+        return "rag"
+    if Path(checkpoint_input).resolve() != Path(current_input).resolve():
         return "rag"
     
     if not get_summary_checkpoint(base_dir, config).exists():
