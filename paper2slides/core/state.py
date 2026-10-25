@@ -48,12 +48,8 @@ def detect_start_stage(base_dir: Path, config_dir: Path, config: Dict) -> str:
         return "rag"
 
     rag_checkpoint = load_json(rag_checkpoint_path)
-    checkpoint_input = (
-        rag_checkpoint.get("input_path") if isinstance(rag_checkpoint, dict) else None
-    )
-    current_input = config.get("input_path")
-    if not checkpoint_input or not current_input:
-        return "rag"
+    checkpoint_input = rag_checkpoint["input_path"]
+    current_input = config["input_path"]
     if Path(checkpoint_input).resolve() != Path(current_input).resolve():
         return "rag"
     
