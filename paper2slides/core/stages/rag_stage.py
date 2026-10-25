@@ -4,6 +4,7 @@ RAG Stage - Document indexing and querying
 import os
 import re
 import base64
+import hashlib
 import logging
 import asyncio
 from pathlib import Path
@@ -273,8 +274,9 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
     fast_mode = config.get("fast_mode", True)
     path = Path(input_path)
     
-    # Determine storage directory
-    output_dir = base_dir / "rag_output"
+    # Same-named inputs share a project; keep their parser/index caches separate.
+    input_key = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()[:16]
+    output_dir = base_dir / "rag_output" / input_key
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # ========== FAST MODE: Parse only, no indexing ==========
@@ -345,7 +347,7 @@ async def run_rag_stage(base_dir: Path, config: Dict) -> Dict:
         from paper2slides.rag.query import get_general_overview, generate_general_queries
         from paper2slides.rag.config import RAGConfig
         
-        storage_dir = base_dir / "rag_storage"
+        storage_dir = base_dir / "rag_storage" / input_key
         storage_dir.mkdir(parents=True, exist_ok=True)
         
         # Create RAGClient with unified storage
